@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>arxiviLM - Document Assistant</title>
+    <!-- PDF.js for in-browser PDF text extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        /* arXiv Style Variables and Reset */
+        :root {
+            --arxiv-red: #b31b1b;
+            --bg-body: #f9f9f9;
+            --bg-panel: #ffffff;
+            --border-color: #dcdcdc;
+            --text-main: #333333;
+            --text-muted: #666666;
+            --link-color: #0000ee;
+            --font-serif: "Times New Roman", Times, serif;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            color: var(--text-main);
+            background-color: var(--bg-body);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Header */
+        header {
+            background-color: var(--bg-panel);
+            border-bottom: 3px solid var(--arxiv-red);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            z-index: 10;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: baseline;
+            gap: 5px;
+        }
+
+        .logo {
+            font-family: var(--font-serif);
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--arxiv-red);
+            text-decoration: none;
+        }
+
+        .logo span {
+            color: #333;
+            font-size: 20px;
+        }
+
+        .api-setup {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #f1f1f1;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+
+        .api-setup label {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .api-setup input {
+            padding: 4px 8px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-family: monospace;
+            width: 250px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #ccc;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
+            transition: background-color 0.3s;
+        }
+
+        .status-indicator.connected {
+            background-color: #28a745;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.2), 0 0 5px rgba(40, 167, 69, 0.4);
+        }
+
+        /* Main Workspace */
+        .workspace {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Left Sidebar: Document Upload & List */
+        .sidebar-left {
+            width: 260px;
+            background-color: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 5;
+        }
+
+        .panel-header {
+            padding: 12px 15px;
+            background-color: #f1f1f1;
+            border-bottom: 1px solid var(--border-color);
+            font-family: var(--font-serif);
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .upload-section {
+            padding: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .upload-btn {
+            display: block;
+            width: 100%;
+            padding: 8px;
+            background-color: #f1f1f1;
+            border: 1px dashed #999;
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        .upload-btn:hover {
+            background-color: #e5e5e5;
+            border-color: var(--arxiv-red);
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .document-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+        }
+
+        .doc-item {
+            padding: 10px 15px;
+            font-size: 13px;
+            border-bottom: 1px solid #f1f1f1;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .doc-item:hover {
+            background-color: #f9f9f9;
+        }
+
+        .doc-item.active {
+            background-color: #fff3f3;
+            border-left: 3px solid var(--arxiv-red);
+            font-weight: bold;
+        }
+
+        .doc-icon {
+            color: var(--arxiv-red);
+            font-size: 16px;
+        }
+
+        /* Center Panel: Shared */
+        .center-panel {
+            flex: 1;
+            background-color: #e5e5e5;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .center-toolbar {
+            background-color: var(--bg-panel);
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px 15px;
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            z-index: 10;
+        }
+
+        .center-toolbar .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .center-toolbar button {
+            padding: 6px 12px;
+            background: #f1f1f1;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-weight: 500;
+        }
+
+        .center-toolbar button:hover {
+            background: #e5e5e5;
+            border-color: #999;
+        }
+        
+        .center-toolbar button.active-view {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+            color: #0d47a1;
+        }
+
+        .empty-state {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: var(--text-muted);
+            font-family: var(--font-serif);
+        }
+
+        .empty-state h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #999;
+        }
+
+        /* View Containers */
+        .view-container {
+            flex: 1;
+            display: none; /* Hidden by default */
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .view-container.active {
+            display: flex;
+        }
+
+        /* PDF Viewer Specifics */
+        #pdf-viewer-container {
+            overflow: auto;
+            justify-content: center;
+            background-color: #525659;
+            padding: 20px;
+        }
+
+        #pdf-render-canvas {
+            direction: ltr;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            background-color: white;
+        }
+
+        /* Mindmap Specifics */
+        #mindmap-container {
+            background-color: #fafafa;
+            overflow: hidden; /* For custom pan/zoom */
+            cursor: grab;
+        }
+        
+        #mindmap-container:active {
+            cursor: grabbing;
+        }
+
+        #mindmap-canvas {
+            position: absolute;
+            transform-origin: 0 0;
+            padding: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-width: 100%;
+            min-height: 100%;
+        }
+
+        /* Pure CSS Tree Structure for Mindmap */
+        .tree ul {
+            padding-top: 20px; position: relative;
+            transition: all 0.5s;
+            display: flex;
+            gap: 20px;
+        }
+        .tree li {
+            float: left; text-align: center;
+            list-style-type: none;
+            position: relative;
+            padding: 20px 5px 0 5px;
+            transition: all 0.5s;
+        }
+        /* Connectors */
+        .tree li::before, .tree li::after {
+            content: '';
+            position: absolute; top: 0; right: 50%;
+            border-top: 2px solid #ccc;
+            width: 50%; height: 20px;
+        }
+        .tree li::after {
+            right: auto; left: 50%;
+            border-left: 2px solid #ccc;
+        }
+        .tree li:only-child::after, .tree li:only-child::before {
+            display: none;
+        }
+        .tree li:only-child { padding-top: 0;}
+        .tree li:first-child::before, .tree li:last-child::after {
+            border: 0 none;
+        }
+        .tree li:last-child::before {
+            border-right: 2px solid #ccc;
+            border-radius: 0 5px 0 0;
+        }
+        .tree li:first-child::after {
+            border-radius: 5px 0 0 0;
+        }
+        /* Downward connectors from parents */
+        .tree ul ul::before {
+            content: '';
+            position: absolute; top: 0; left: 50%;
+            border-left: 2px solid #ccc;
+            width: 0; height: 20px;
+        }
+        
+        .mm-node {
+            border: 1px solid var(--border-color);
+            padding: 12px 16px;
+            text-decoration: none;
+            color: var(--text-main);
+            font-family: var(--font-sans);
+            font-size: 13px;
+            display: inline-block;
+            border-radius: 6px;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+            max-width: 200px;
+            text-align: left;
+        }
+        .mm-node:hover {
+            background: #fff8f8;
+            border-color: var(--arxiv-red);
+            box-shadow: 0 4px 8px rgba(179, 27, 27, 0.15);
+        }
+        .mm-node strong {
+            display: block;
+            font-family: var(--font-serif);
+            font-size: 15px;
+            color: var(--arxiv-red);
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 4px;
+        }
+        .mm-node p {
+            margin: 0;
+            line-height: 1.3;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* Presentation Specifics */
+        #presentation-container {
+            background-color: #222;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        
+        .slide-card {
+            background: white;
+            width: 80%;
+            max-width: 800px;
+            aspect-ratio: 16/9;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            padding: 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .slide-title {
+            font-family: var(--font-serif);
+            font-size: 36px;
+            color: var(--arxiv-red);
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--arxiv-red);
+            padding-bottom: 15px;
+        }
+
+        .slide-content {
+            font-size: 22px;
+            line-height: 1.6;
+            color: var(--text-main);
+        }
+        
+        .slide-content li {
+            margin-bottom: 15px;
+            margin-left: 25px;
+        }
+
+        .pres-controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            color: white;
+        }
+        
+        .pres-controls button {
+            background: transparent;
+            color: white;
+            border: 1px solid white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .pres-controls button:hover:not(:disabled) {
+            background: rgba(255,255,255,0.2);
+        }
+        .pres-controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Right Sidebar: Chatbot */
+        .sidebar-right {
+            width: 380px;
+            background-color: var(--bg-panel);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 5;
+        }
+
+        .chat-history {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #fafafa;
+        }
+
+        .message {
+            max-width: 90%;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background-color: #e3f2fd;
+            border: 1px solid #bbdefb;
+            color: #0d47a1;
+        }
+
+        .message.model {
+            align-self: flex-start;
+            background-color: #ffffff;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .message.system {
+            align-self: center;
+            background-color: transparent;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-style: italic;
+            text-align: center;
+            max-width: 100%;
+        }
+
+        .chat-input-area {
+            padding: 15px;
+            background-color: var(--bg-panel);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #chat-input {
+            width: 100%;
+            height: 80px;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            resize: none;
+            font-family: var(--font-sans);
+            font-size: 14px;
+        }
+
+        #chat-input:focus {
+            outline: none;
+            border-color: var(--arxiv-red);
+        }
+
+        .send-btn {
+            align-self: flex-end;
+            background-color: var(--arxiv-red);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        .send-btn:hover {
+            background-color: #901515;
+        }
+
+        .send-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .typing-indicator {
+            display: none;
+            align-self: flex-start;
+            background-color: #ffffff;
+            border: 1px solid var(--border-color);
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+        
+        #global-loader {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.9);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            font-family: var(--font-serif);
+            font-size: 18px;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(0,0,0,0.1);
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            border-left-color: var(--arxiv-red);
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+        
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-container">
+            <a href="#" class="logo">arxiviLM <span>Interactive Document Research</span></a>
+        </div>
+        <div class="api-setup">
+            <label for="api-key">Gemini API Key:</label>
+            <input type="password" id="api-key" placeholder="AIzaSy...">
+            <div id="api-status" class="status-indicator" title="Red: Missing Key | Green: Ready"></div>
+        </div>
+    </header>
+
+    <div class="workspace">
+        <!-- Left Sidebar: Documents -->
+        <aside class="sidebar-left">
+            <div class="panel-header">Research Papers</div>
+            <div class="upload-section">
+                <label for="file-input" class="upload-btn">
+                    + Upload PDF(s)
+                </label>
+                <input type="file" id="file-input" accept=".pdf" multiple>
+            </div>
+            <div class="document-list" id="document-list"></div>
+        </aside>
+
+        <!-- Center Panel -->
+        <main class="center-panel">
+            <div class="empty-state" id="empty-state">
+                <h2>No Document Selected</h2>
+                <p>Upload a research paper from the left panel to begin reading.</p>
+            </div>
+            
+            <!-- Global Center Toolbar -->
+            <div id="center-toolbar" class="center-toolbar">
+                <div class="controls" id="view-toggles">
+                    <button id="toggle-pdf" class="active-view">View PDF</button>
+                    <button id="toggle-mindmap">Mindmap</button>
+                    <button id="toggle-presentation">Presentation</button>
+                </div>
+                
+                <!-- Dynamic Context Controls (Changes based on active view) -->
+                <div class="controls" id="pdf-controls">
+                    <button id="prev-page">Prev</button>
+                    <span>Page: <span id="page-num">0</span>/<span id="page-count">0</span></span>
+                    <button id="next-page">Next</button>
+                    <button id="zoom-out">-</button>
+                    <button id="zoom-in">+</button>
+                </div>
+                <div class="controls" id="mindmap-controls" style="display:none;">
+                    <span style="color:#666; font-size:12px; margin-right: 10px;">Scroll to Zoom, Drag to Pan</span>
+                    <button id="reset-mindmap">Reset View</button>
+                </div>
+            </div>
+            
+            <!-- VIEW 1: PDF Viewer -->
+            <div id="pdf-viewer-container" class="view-container active">
+                <canvas id="pdf-render-canvas"></canvas>
+            </div>
+            
+            <!-- VIEW 2: Mindmap Viewer -->
+            <div id="mindmap-container" class="view-container">
+                <div id="mindmap-canvas" class="tree"></div>
+            </div>
+            
+            <!-- VIEW 3: Presentation Viewer -->
+            <div id="presentation-container" class="view-container">
+                <div class="slide-card" id="slide-card">
+                    <div class="slide-title" id="slide-title">Slide Title</div>
+                    <ul class="slide-content" id="slide-content"></ul>
+                </div>
+                <div class="pres-controls">
+                    <button id="prev-slide">← Previous</button>
+                    <span id="slide-counter">1 / 1</span>
+                    <button id="next-slide">Next →</button>
+                </div>
+            </div>
+            
+            <!-- Shared Loading Overlay -->
+            <div id="global-loader">
+                <div class="spinner"></div>
+                <div id="loader-title" style="color: var(--arxiv-red); font-weight: bold; margin-bottom: 5px;">Processing...</div>
+                <div id="loader-subtitle" style="font-size: 14px; color: #666;">Please wait.</div>
+            </div>
+        </main>
+
+        <!-- Right Sidebar: Chat -->
+        <aside class="sidebar-right">
+            <div class="panel-header">Research Assistant Chat</div>
+            <div class="chat-history" id="chat-history">
+                <div class="message system">
+                    Welcome to arxiviLM. Please provide your Gemini API key, upload your PDFs, and explore the different views.
+                </div>
+            </div>
+            <div class="typing-indicator" id="typing-indicator">
+                arxiviLM is typing...
+            </div>
+            <div class="chat-input-area">
+                <textarea id="chat-input" placeholder="Ask a question about the uploaded papers..."></textarea>
+                <button id="send-btn" class="send-btn">Send Query</button>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // --- Core State ---
+        let uploadedPapers = []; // { id, name, arrayBuffer, extractedText, mindmapData, presentationData }
+        let currentActiveId = null;
+        let chatMessages = []; 
+
+        // --- DOM Elements ---
+        const apiKeyInput = document.getElementById('api-key');
+        const apiStatus = document.getElementById('api-status');
+        
+        // Views & Toolbar
+        const emptyState = document.getElementById('empty-state');
+        const centerToolbar = document.getElementById('center-toolbar');
+        const pdfContainer = document.getElementById('pdf-viewer-container');
+        const mindmapContainer = document.getElementById('mindmap-container');
+        const presentationContainer = document.getElementById('presentation-container');
+        
+        const togglePdfBtn = document.getElementById('toggle-pdf');
+        const toggleMindmapBtn = document.getElementById('toggle-mindmap');
+        const togglePresBtn = document.getElementById('toggle-presentation');
+        
+        const pdfControls = document.getElementById('pdf-controls');
+        const mindmapControls = document.getElementById('mindmap-controls');
+        
+        const globalLoader = document.getElementById('global-loader');
+        const loaderTitle = document.getElementById('loader-title');
+        const loaderSubtitle = document.getElementById('loader-subtitle');
+
+        // --- API Validation UI ---
+        apiKeyInput.addEventListener('input', () => {
+            if (apiKeyInput.value.trim().length > 10) apiStatus.classList.add('connected');
+            else apiStatus.classList.remove('connected');
+        });
+
+        function showLoader(title, subtitle) {
+            loaderTitle.textContent = title;
+            loaderSubtitle.textContent = subtitle;
+            globalLoader.style.display = 'flex';
+        }
+        function hideLoader() { globalLoader.style.display = 'none'; }
+        
+        function getActivePaper() {
+            return uploadedPapers.find(p => p.id === currentActiveId);
+        }
+
+        // --- View Switching Logic ---
+        function switchView(viewName) {
+            if (!currentActiveId) return;
+            
+            // Update Buttons
+            [togglePdfBtn, toggleMindmapBtn, togglePresBtn].forEach(btn => btn.classList.remove('active-view'));
+            
+            // Hide all containers & controls
+            [pdfContainer, mindmapContainer, presentationContainer].forEach(c => c.classList.remove('active'));
+            pdfControls.style.display = 'none';
+            mindmapControls.style.display = 'none';
+
+            if (viewName === 'pdf') {
+                togglePdfBtn.classList.add('active-view');
+                pdfContainer.classList.add('active');
+                pdfControls.style.display = 'flex';
+            } else if (viewName === 'mindmap') {
+                toggleMindmapBtn.classList.add('active-view');
+                mindmapContainer.classList.add('active');
+                mindmapControls.style.display = 'flex';
+                loadMindmap();
+            } else if (viewName === 'presentation') {
+                togglePresBtn.classList.add('active-view');
+                presentationContainer.classList.add('active');
+                loadPresentation();
+            }
+        }
+
+        togglePdfBtn.addEventListener('click', () => switchView('pdf'));
+        toggleMindmapBtn.addEventListener('click', () => switchView('mindmap'));
+        togglePresBtn.addEventListener('click', () => switchView('presentation'));
+
+
+        // --- PDF Upload & Processing ---
+        const fileInput = document.getElementById('file-input');
+        fileInput.addEventListener('change', async (e) => {
+            const files = e.target.files;
+            if (files.length === 0) return;
+
+            showLoader("Parsing PDF...", "Extracting text and images.");
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                if (file.type !== 'application/pdf') continue;
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const textContent = await extractTextFromPdfBuffer(arrayBuffer);
+
+                    uploadedPapers.push({
+                        id: 'doc_' + Date.now() + '_' + i,
+                        name: file.name,
+                        arrayBuffer: arrayBuffer,
+                        extractedText: textContent,
+                        mindmapData: null,
+                        presentationData: null
+                    });
+                    addSystemMessage(`Successfully processed: ${file.name}`);
+                } catch (err) {
+                    console.error("PDF Parsing error:", err);
+                    addSystemMessage(`Error parsing ${file.name}.`);
+                }
+            }
+            fileInput.value = '';
+            renderDocumentList();
+            if (uploadedPapers.length > 0 && !currentActiveId) selectDocument(uploadedPapers[0].id);
+            hideLoader();
+        });
+
+        async function extractTextFromPdfBuffer(arrayBuffer) {
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+            let fullText = '';
+            for (let pNum = 1; pNum <= pdf.numPages; pNum++) {
+                try {
+                    const page = await pdf.getPage(pNum);
+                    const textContent = await page.getTextContent();
+                    fullText += `\n--- PAGE ${pNum} ---\n` + textContent.items.map(item => item.str).join(' ') + '\n\n';
+                } catch (e) { }
+            }
+            return fullText;
+        }
+
+        // --- Sidebar Document List ---
+        const documentList = document.getElementById('document-list');
+        function renderDocumentList() {
+            documentList.innerHTML = '';
+            uploadedPapers.forEach(paper => {
+                const div = document.createElement('div');
+                div.className = `doc-item ${paper.id === currentActiveId ? 'active' : ''}`;
+                div.innerHTML = `<span class="doc-icon">📄</span> ${paper.name}`;
+                div.onclick = () => selectDocument(paper.id);
+                documentList.appendChild(div);
+            });
+        }
+
+        function selectDocument(id) {
+            currentActiveId = id;
+            emptyState.style.display = 'none';
+            centerToolbar.style.display = 'flex';
+            renderDocumentList();
+            
+            // Always default to PDF view on new selection
+            loadPdfViewer();
+            switchView('pdf'); 
+        }
+
+        // --- PDF Viewer Logic ---
+        let pdfDoc = null, pageNum = 1, pageRendering = false, pageNumPending = null, currentScale = 1.2;
+        const pdfRenderCanvas = document.getElementById('pdf-render-canvas');
+        const canvasCtx = pdfRenderCanvas.getContext('2d');
+
+        function loadPdfViewer() {
+            const paper = getActivePaper();
+            if(!paper) return;
+            
+            pdfjsLib.getDocument({ data: paper.arrayBuffer.slice(0) }).promise.then(function(doc) {
+                pdfDoc = doc;
+                document.getElementById('page-count').textContent = pdfDoc.numPages;
+                pageNum = 1;
+                renderPage(pageNum);
+            });
+        }
+
+        function renderPage(num) {
+            pageRendering = true;
+            pdfDoc.getPage(num).then(function(page) {
+                const viewport = page.getViewport({ scale: currentScale });
+                pdfRenderCanvas.height = viewport.height;
+                pdfRenderCanvas.width = viewport.width;
+                const renderTask = page.render({ canvasContext: canvasCtx, viewport: viewport });
+                renderTask.promise.then(function() {
+                    pageRendering = false;
+                    if (pageNumPending !== null) { renderPage(pageNumPending); pageNumPending = null; }
+                });
+            });
+            document.getElementById('page-num').textContent = num;
+        }
+        function queueRenderPage(num) { if (pageRendering) { pageNumPending = num; } else { renderPage(num); } }
+
+        document.getElementById('prev-page').addEventListener('click', () => { if (pageNum <= 1) return; queueRenderPage(--pageNum); });
+        document.getElementById('next-page').addEventListener('click', () => { if (pageNum >= pdfDoc.numPages) return; queueRenderPage(++pageNum); });
+        document.getElementById('zoom-in').addEventListener('click', () => { currentScale += 0.2; queueRenderPage(pageNum); });
+        document.getElementById('zoom-out').addEventListener('click', () => { if (currentScale <= 0.6) return; currentScale -= 0.2; queueRenderPage(pageNum); });
+
+
+        // --- Mindmap Logic ---
+        const mindmapCanvas = document.getElementById('mindmap-canvas');
+        let mmScale = 1, mmPanX = 0, mmPanY = 0;
+        let isDraggingMM = false, startX, startY;
+
+        // Pan & Zoom Event Listeners for Mindmap Container
+        mindmapContainer.addEventListener('mousedown', (e) => {
+            isDraggingMM = true;
+            startX = e.clientX - mmPanX;
+            startY = e.clientY - mmPanY;
+        });
+        mindmapContainer.addEventListener('mousemove', (e) => {
+            if (!isDraggingMM) return;
+            mmPanX = e.clientX - startX;
+            mmPanY = e.clientY - startY;
+            updateMindmapTransform();
+        });
+        mindmapContainer.addEventListener('mouseup', () => isDraggingMM = false);
+        mindmapContainer.addEventListener('mouseleave', () => isDraggingMM = false);
+        mindmapContainer.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSensitivity = 0.001;
+            mmScale -= e.deltaY * zoomSensitivity;
+            mmScale = Math.min(Math.max(0.2, mmScale), 3); // clamp scale
+            updateMindmapTransform();
+        });
+        document.getElementById('reset-mindmap').addEventListener('click', () => {
+            mmScale = 1; mmPanX = 0; mmPanY = 0; updateMindmapTransform();
+        });
+        
+        function updateMindmapTransform() {
+            mindmapCanvas.style.transform = `translate(${mmPanX}px, ${mmPanY}px) scale(${mmScale})`;
+        }
+
+        async function loadMindmap() {
+            const paper = getActivePaper();
+            const apiKey = apiKeyInput.value.trim();
+            
+            if (paper.mindmapData) {
+                renderMindmapDOM(paper.mindmapData);
+                return;
+            }
+            
+            if (!apiKey) {
+                mindmapCanvas.innerHTML = '<div class="mm-node"><strong>API Key Required</strong><p>Please enter your Gemini API key above to generate the mindmap.</p></div>';
+                return;
+            }
+
+            showLoader("Generating Mindmap...", "Using AI to structure the document.");
+            
+            const schema = {
+                type: "OBJECT",
+                properties: {
+                    name: { type: "STRING", description: "Main topic/title of paper" },
+                    description: { type: "STRING", description: "Brief 1-sentence summary" },
+                    children: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                name: { type: "STRING", description: "Subtopic or section name" },
+                                description: { type: "STRING", description: "Minimal site description of what is inside this node" },
+                                children: {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            name: { type: "STRING" },
+                                            description: { type: "STRING" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                required: ["name", "description", "children"]
+            };
+
+            const prompt = `Analyze the following academic document and create a hierarchical mindmap structure. Limit depth to 2 levels under the root. Provide a minimal site description for every node explaining what's inside it.\n\nDocument text:\n${paper.extractedText.substring(0, 100000)}...`; // Limit text if crazy long
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: schema,
+                            temperature: 0.1
+                        }
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+                
+                const resultText = data.candidates[0].content.parts[0].text;
+                const mindmapJSON = JSON.parse(resultText);
+                
+                paper.mindmapData = mindmapJSON; // cache it
+                renderMindmapDOM(mindmapJSON);
+                
+                // Reset view
+                mmScale = 1; mmPanX = 0; mmPanY = 0; updateMindmapTransform();
+                
+            } catch (err) {
+                console.error(err);
+                mindmapCanvas.innerHTML = `<div class="mm-node" style="border-color:red;"><strong>Error</strong><p>${err.message}</p></div>`;
+            } finally {
+                hideLoader();
+            }
+        }
+
+        function renderMindmapDOM(data) {
+            mindmapCanvas.innerHTML = '';
+            
+            function buildList(node) {
+                const li = document.createElement('li');
+                
+                const div = document.createElement('div');
+                div.className = 'mm-node';
+                div.innerHTML = `<strong>${node.name || 'Topic'}</strong><p>${node.description || ''}</p>`;
+                li.appendChild(div);
+                
+                if (node.children && node.children.length > 0) {
+                    const ul = document.createElement('ul');
+                    node.children.forEach(child => {
+                        ul.appendChild(buildList(child));
+                    });
+                    li.appendChild(ul);
+                }
+                return li;
+            }
+            
+            const rootUl = document.createElement('ul');
+            rootUl.appendChild(buildList(data));
+            mindmapCanvas.appendChild(rootUl);
+        }
+
+        // --- Presentation Logic ---
+        let currentSlideIdx = 0;
+        let activeSlides = [];
+        const slideTitleEl = document.getElementById('slide-title');
+        const slideContentEl = document.getElementById('slide-content');
+        const slideCounterEl = document.getElementById('slide-counter');
+
+        async function loadPresentation() {
+            const paper = getActivePaper();
+            const apiKey = apiKeyInput.value.trim();
+            
+            if (paper.presentationData) {
+                activeSlides = paper.presentationData;
+                currentSlideIdx = 0;
+                renderSlide();
+                return;
+            }
+            
+            if (!apiKey) {
+                slideTitleEl.textContent = "API Key Required";
+                slideContentEl.innerHTML = "<li>Please enter your Gemini API key above to generate the presentation.</li>";
+                slideCounterEl.textContent = "0 / 0";
+                return;
+            }
+
+            showLoader("Creating Presentation...", "Summarizing key points into slides.");
+            
+            const schema = {
+                type: "ARRAY",
+                items: {
+                    type: "OBJECT",
+                    properties: {
+                        title: { type: "STRING", description: "Slide Title" },
+                        bulletPoints: {
+                            type: "ARRAY",
+                            items: { type: "STRING", description: "A short, punchy bullet point" }
+                        }
+                    },
+                    required: ["title", "bulletPoints"]
+                }
+            };
+
+            const prompt = `Convert the following academic document into a minimal presentation slide deck (approx 5-8 slides). Extract the core problem, methodology, key findings, and conclusion.\n\nDocument text:\n${paper.extractedText.substring(0, 100000)}...`;
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: schema,
+                            temperature: 0.2
+                        }
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+                
+                const resultText = data.candidates[0].content.parts[0].text;
+                activeSlides = JSON.parse(resultText);
+                
+                paper.presentationData = activeSlides; // cache it
+                currentSlideIdx = 0;
+                renderSlide();
+                
+            } catch (err) {
+                console.error(err);
+                slideTitleEl.textContent = "Error Generating Presentation";
+                slideContentEl.innerHTML = `<li>${err.message}</li>`;
+            } finally {
+                hideLoader();
+            }
+        }
+        
+        function renderSlide() {
+            if (!activeSlides || activeSlides.length === 0) return;
+            
+            const slide = activeSlides[currentSlideIdx];
+            slideTitleEl.textContent = slide.title;
+            
+            slideContentEl.innerHTML = '';
+            slide.bulletPoints.forEach(pt => {
+                const li = document.createElement('li');
+                li.textContent = pt;
+                slideContentEl.appendChild(li);
+            });
+            
+            slideCounterEl.textContent = `${currentSlideIdx + 1} / ${activeSlides.length}`;
+            
+            document.getElementById('prev-slide').disabled = currentSlideIdx === 0;
+            document.getElementById('next-slide').disabled = currentSlideIdx === activeSlides.length - 1;
+        }
+
+        document.getElementById('prev-slide').addEventListener('click', () => {
+            if (currentSlideIdx > 0) { currentSlideIdx--; renderSlide(); }
+        });
+        document.getElementById('next-slide').addEventListener('click', () => {
+            if (currentSlideIdx < activeSlides.length - 1) { currentSlideIdx++; renderSlide(); }
+        });
+
+
+        // --- Chatbot Logic ---
+        const chatHistory = document.getElementById('chat-history');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const typingIndicator = document.getElementById('typing-indicator');
+
+        function appendMessageToUI(role, text) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            if (role === 'model') {
+                let fText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+                div.innerHTML = fText;
+            } else { div.textContent = text; }
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            const div = document.createElement('div');
+            div.className = 'message system';
+            div.textContent = text;
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        async function handleSend() {
+            const text = chatInput.value.trim();
+            if (!text) return;
+
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) return addSystemMessage("Error: Please provide a Gemini API Key.");
+            if (uploadedPapers.length === 0) return addSystemMessage("Please upload a paper first.");
+
+            appendMessageToUI('user', text);
+            chatInput.value = '';
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+            typingIndicator.style.display = 'block';
+
+            chatMessages.push({ role: "user", parts: [{ text: text }] });
+
+            let systemPrompt = `You are arxiviLM, an intelligent and agentic research assistant. 
+Instructions:
+1. General Knowledge: If the user asks a general question (e.g., historical facts, general science, programming), answer it directly using your internal knowledge. Do not restrict yourself to the documents for general queries.
+2. Document Q&A: If the user asks about the uploaded documents, answer based strictly on the text provided below.
+3. Citations REQUIRED: Whenever you answer based on the document, you MUST cite the specific page number(s) where you found the information. Use the "--- PAGE X ---" markers provided in the text to identify pages. Format your citation like: (Page X).
+
+Uploaded Documents Context:\n\n`;
+            uploadedPapers.forEach(paper => {
+                systemPrompt += `=== DOC: ${paper.name} ===\n${paper.extractedText}\n\n`;
+            });
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        systemInstruction: { parts: [{ text: systemPrompt }] },
+                        contents: chatMessages,
+                        generationConfig: { temperature: 0.2 }
+                    })
+                });
+
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+
+                const modelResponseText = data.candidates[0].content.parts[0].text;
+                appendMessageToUI('model', modelResponseText);
+                chatMessages.push({ role: "model", parts: [{ text: modelResponseText }] });
+            } catch (error) {
+                addSystemMessage(`Failed: ${error.message}`);
+                chatMessages.pop(); 
+            } finally {
+                chatInput.disabled = false;
+                sendBtn.disabled = false;
+                typingIndicator.style.display = 'none';
+                chatInput.focus();
+            }
+        }
+        
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+        });
+        sendBtn.addEventListener('click', handleSend);
+
+    </script>
+</body>
+</html>
